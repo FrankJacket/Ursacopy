@@ -147,6 +147,38 @@ public sealed class CopyEngineTests : IDisposable
     }
 
     [Fact]
+    public void OnlyChosenFoldersAreCopied_AndUnchosenOnesAreRemovedLater()
+    {
+        Write("root.txt", "r"); Write("photos/a.jpg", "a"); Write("docs/2024/x.txt", "x"); Write("docs/2023/y.txt", "y"); Write("video/v.mp4", "v");
+        CopyOptions Inc(params string[] i) => new()
+        {
+            SourceDir = _src, TargetDir = _usb, TargetId = _id, DestFolder = "data", Includes = i,
+        };
+        var r = Run(Inc("photos", "docs/2024"), out var p);
+        Assert.Equal(CopyStatus.Success, r.Status);
+        Assert.Equal(2, p.Copied);
+        Assert.True(File.Exists(Dst("photos/a.jpg")));
+        Assert.True(File.Exists(Dst("docs/2024/x.txt")));
+        Assert.False(File.Exists(Dst("docs/2023/y.txt")));
+        Assert.False(File.Exists(Dst("root.txt")));
+        Assert.False(Directory.Exists(Dst("video")));
+
+        Run(Inc("photos"), out var p2); // docs/2024 unchecked: leaves the copy, into the trash
+        Assert.False(Directory.Exists(Dst("docs")));
+        Assert.True(File.Exists(Dst("photos/a.jpg")));
+        Assert.Single(Directory.GetFiles(Path.Combine(_usb, CopyEngine.TrashDirName), "x.txt", SearchOption.AllDirectories));
+    }
+
+    [Theory]
+    [InlineData("../x")] [InlineData("a/../b")]
+    public void IncludesOutsideTheSourceAreRefused(string inc)
+    {
+        Write("a.txt", "a");
+        var o = new CopyOptions { SourceDir = _src, TargetDir = _usb, TargetId = _id, DestFolder = "data", Includes = [inc] };
+        Assert.Equal(CopyStatus.Failed, CopyEngine.Run(o, new CopyProgress(), CancellationToken.None).Status);
+    }
+
+    [Fact]
     public void LeftoverPartFilesAreCleaned()
     {
         Write("a.txt", "a");

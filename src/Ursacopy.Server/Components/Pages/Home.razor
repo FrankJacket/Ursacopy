@@ -52,7 +52,7 @@
         </MudStack>
 
         <MudText Typo="Typo.body2" Class="mud-text-secondary mt-1" Style="word-break:break-all">
-            @job.SourceDir &rarr; @job.TargetDir/@job.DestFolder &middot; @ScheduleText(job)
+            @job.SourceDir@(job.IncludeList().Length > 0 ? $" ({job.IncludeList().Length} folders)" : "") &rarr; @job.TargetDir/@job.DestFolder &middot; @ScheduleText(job)
             @if (disk.State == DiskState.Connected && disk.TotalBytes > 0) { <span> &middot; @Fmt.Bytes(disk.FreeBytes) free of @Fmt.Bytes(disk.TotalBytes)</span> }
         </MudText>
 

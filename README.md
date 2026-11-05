@@ -7,6 +7,7 @@ Copies folders of a NAS onto an **external USB disk** plugged into it, increment
 - **Safe against a missing disk**: a job only writes to a disk that carries its marker file (`.ursacopy-target`). If the USB disk is not mounted, the container sees an empty folder of the NAS system disk and the run refuses to write anything.
 - **Safe against a missing source**: if the source folder is empty while the copy holds data (share not mounted), nothing is deleted.
 - **Trash**: files deleted from the source, and previous versions of changed files, go to `.ursacopy-trash/<folder>/<date>` on the disk and are purged after N days (default 30). Set 0 to delete right away.
+- **Folder picker**: browse the source and tick the folders to copy (e.g. `photos` and `docs/2024` out of `/source`); they keep their relative path on the disk. Nothing ticked = the whole source. A folder unticked later is removed from the disk at the next run (into the trash).
 - **Triggers**: manual, every day at a time, or whenever the disk is connected.
 - **Optional verification**: re-reads each copied file and compares its SHA-256.
 - The sources are mounted read-only in the container: it cannot alter your data.
@@ -19,7 +20,7 @@ Edit the two bind mounts of `compose.yaml` (the NAS folder to copy, and where th
 
 Open `http://<nas>:5090`:
 
-1. **New job**: name, folder to copy (e.g. `/source/photos`), mount point of the disk (`/target`), folder on the disk (e.g. `photos`), schedule.
+1. **New job**: name, source folder (e.g. `/source`) then **Choose folders...** to tick what to copy, mount point of the disk (`/target`), folder on the disk (e.g. `photos`), schedule.
 2. **Initialise the disk** (once per disk). The dialog shows the size of the disk behind `/target`: check that it is your USB disk and not the NAS system disk. Several jobs can share one disk.
 3. **Run now**, or wait for the schedule.
 

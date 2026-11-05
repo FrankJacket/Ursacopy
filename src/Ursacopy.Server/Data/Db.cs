@@ -34,5 +34,8 @@ public sealed class Db(IConfiguration cfg)
               Errors INTEGER NOT NULL DEFAULT 0, Message TEXT NULL, Details TEXT NULL);
             CREATE INDEX IF NOT EXISTS IX_Runs_Job ON Runs(JobId, StartedUtc);
             """);
+        // Column added after the first release.
+        if (!c.Query<string>("SELECT name FROM pragma_table_info('Jobs')").Contains("Includes"))
+            c.Execute("ALTER TABLE Jobs ADD COLUMN Includes TEXT NOT NULL DEFAULT ''");
     }
 }

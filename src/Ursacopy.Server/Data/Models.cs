@@ -11,6 +11,8 @@ public sealed class Job
     public int Id { get; set; }
     public string Name { get; set; } = "";
     public string SourceDir { get; set; } = "";
+    /// <summary>Chosen folders of the source, relative to it, one per line; empty = the whole source.</summary>
+    public string Includes { get; set; } = "";
     /// <summary>Mount point of the external disk in the container.</summary>
     public string TargetDir { get; set; } = "/target";
     /// <summary>Folder of the external disk that receives the mirror.</summary>
@@ -27,6 +29,9 @@ public sealed class Job
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     /// <summary>Number of files seen by the last complete run: the denominator of the progress bar.</summary>
     public long EstimatedFiles { get; set; }
+
+    public string[] IncludeList() =>
+        Includes.Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     public string[] ExcludeList() =>
         Excludes.Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

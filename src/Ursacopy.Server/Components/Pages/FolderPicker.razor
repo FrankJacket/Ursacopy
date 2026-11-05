@@ -1,0 +1,120 @@
+@* Browse the source folder and tick the sub-folders to copy. Closes with DialogResult.Ok(List<string>) of paths relative to the root. *@
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-2">
+            Tick the folders to copy (everything inside a ticked folder is included). Nothing ticked = the whole of <b>@Root</b>.
+        </MudText>
+        <div style="max-height:50vh; overflow:auto" class="pa-1">
+            @if (root.Error is { } err)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">@err</MudAlert>
+            }
+            else if (root.Kids is { Count: 0 })
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">This folder has no sub-folder.</MudText>
+            }
+            else if (root.Kids is { } kids)
+            {
+                @foreach (var k in kids) { @Draw(k, 0) }
+            }
+        </div>
+        <MudDivider Class="my-2" />
+        @if (selected.Count == 0)
+        {
+            <MudText Typo="Typo.caption">Whole source selected.</MudText>
+        }
+        else
+        {
+            <MudText Typo="Typo.caption">@selected.Count folder(s) selected:</MudText>
+            <div>
+                @foreach (var s in selected.OrderBy(x => x, StringComparer.Ordinal))
+                {
+                    var path = s;
+                    <MudChip T="string" Size="Size.Small" OnClose="() => selected.Remove(path)">@path</MudChip>
+                }
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Done">OK</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    sealed class Node
+    {
+        public string Rel = "", Name = "";
+        public bool Open;
+        public List<Node>? Kids;
+        public string? Error;
+    }
+
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter, EditorRequired] public string Root { get; set; } = "";
+    [Parameter] public List<string> Selected { get; set; } = [];
+
+    static readonly ExcludeMatcher Hidden = new(ExcludeMatcher.NasDefaults);
+    readonly Node root = new();
+    HashSet<string> selected = [];
+
+    protected override void OnInitialized()
+    {
+        selected = Selected.ToHashSet();
+        Load(root);
+    }
+
+    void Load(Node n)
+    {
+        try
+        {
+            var abs = n.Rel.Length == 0 ? Root : Path.Combine(Root, n.Rel);
+            n.Kids = Directory.EnumerateDirectories(abs)
+                .Select(d => Path.GetFileName(d))
+                .Where(name => !Hidden.IsExcluded(name, name))
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .Select(name => new Node { Name = name, Rel = n.Rel.Length == 0 ? name : n.Rel + "/" + name })
+                .ToList();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            n.Kids = [];
+            n.Error = ex.Message;
+        }
+    }
+
+    void Expand(Node n)
+    {
+        n.Open = !n.Open;
+        if (n.Open && n.Kids is null) Load(n);
+    }
+
+    bool Ticked(string rel) => selected.Any(s => rel == s || rel.StartsWith(s + "/", StringComparison.Ordinal));
+    bool Inherited(string rel) => selected.Any(s => rel.StartsWith(s + "/", StringComparison.Ordinal));
+
+    void Toggle(Node n, bool on)
+    {
+        if (on)
+        {
+            selected.RemoveWhere(s => s.StartsWith(n.Rel + "/", StringComparison.Ordinal)); // now covered by this folder
+            selected.Add(n.Rel);
+        }
+        else selected.Remove(n.Rel);
+    }
+
+    void Done() => MudDialog.Close(DialogResult.Ok(selected.OrderBy(s => s, StringComparer.Ordinal).ToList()));
+
+    RenderFragment Draw(Node n, int depth) => @<div>
+        <div style="display:flex; align-items:center; margin-left:@(depth * 24)px">
+            <MudIconButton Icon="@(n.Open ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)" Size="Size.Small" OnClick="() => Expand(n)" />
+            <MudCheckBox T="bool" Value="@Ticked(n.Rel)" ValueChanged="(bool v) => Toggle(n, v)" Disabled="@Inherited(n.Rel)" Size="Size.Small" />
+            <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Small" Class="mr-1" />
+            <span>@n.Name</span>
+        </div>
+        @if (n.Open && n.Kids is { } kids)
+        {
+            @if (n.Error is { } e) { <MudText Typo="Typo.caption" Color="Color.Error" Style="@($"margin-left:{(depth + 1) * 24 + 8}px")">@e</MudText> }
+            @foreach (var k in kids) { @Draw(k, depth + 1) }
+        }
+    </div>;
+}

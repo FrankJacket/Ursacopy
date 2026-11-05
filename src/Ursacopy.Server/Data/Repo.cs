@@ -4,7 +4,7 @@ namespace Ursacopy.Server.Data;
 
 public sealed class Repo(Db db)
 {
-    const string JobCols = "Id, Name, SourceDir, TargetDir, DestFolder, TargetId, Enabled, ScheduleMode, DailyTime, MirrorDeletes, RetentionDays, Verify, Excludes, CreatedUtc, EstimatedFiles";
+    const string JobCols = "Id, Name, SourceDir, Includes, TargetDir, DestFolder, TargetId, Enabled, ScheduleMode, DailyTime, MirrorDeletes, RetentionDays, Verify, Excludes, CreatedUtc, EstimatedFiles";
 
     public List<Job> ListJobs()
     {
@@ -23,12 +23,12 @@ public sealed class Repo(Db db)
         using var c = db.Open();
         if (j.Id == 0)
             return j.Id = c.ExecuteScalar<int>("""
-                INSERT INTO Jobs (Name, SourceDir, TargetDir, DestFolder, TargetId, Enabled, ScheduleMode, DailyTime, MirrorDeletes, RetentionDays, Verify, Excludes, CreatedUtc, EstimatedFiles)
-                VALUES (@Name, @SourceDir, @TargetDir, @DestFolder, @TargetId, @Enabled, @ScheduleMode, @DailyTime, @MirrorDeletes, @RetentionDays, @Verify, @Excludes, @CreatedUtc, @EstimatedFiles);
+                INSERT INTO Jobs (Name, SourceDir, Includes, TargetDir, DestFolder, TargetId, Enabled, ScheduleMode, DailyTime, MirrorDeletes, RetentionDays, Verify, Excludes, CreatedUtc, EstimatedFiles)
+                VALUES (@Name, @SourceDir, @Includes, @TargetDir, @DestFolder, @TargetId, @Enabled, @ScheduleMode, @DailyTime, @MirrorDeletes, @RetentionDays, @Verify, @Excludes, @CreatedUtc, @EstimatedFiles);
                 SELECT last_insert_rowid();
                 """, j);
         c.Execute("""
-            UPDATE Jobs SET Name=@Name, SourceDir=@SourceDir, TargetDir=@TargetDir, DestFolder=@DestFolder, TargetId=@TargetId, Enabled=@Enabled,
+            UPDATE Jobs SET Name=@Name, SourceDir=@SourceDir, Includes=@Includes, TargetDir=@TargetDir, DestFolder=@DestFolder, TargetId=@TargetId, Enabled=@Enabled,
               ScheduleMode=@ScheduleMode, DailyTime=@DailyTime, MirrorDeletes=@MirrorDeletes, RetentionDays=@RetentionDays, Verify=@Verify, Excludes=@Excludes
             WHERE Id=@Id
             """, j);

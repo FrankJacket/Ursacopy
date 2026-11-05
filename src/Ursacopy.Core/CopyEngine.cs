@@ -22,10 +22,12 @@ public sealed class CopyEngine
     readonly ExcludeMatcher _exclude;
     readonly List<string> _errors = [];
     readonly string _srcRoot, _dstRoot, _trashRoot, _stamp;
+    readonly List<string> _inc;
 
     CopyEngine(CopyOptions o, CopyProgress p, CancellationToken ct)
     {
         _o = o; _p = p; _ct = ct;
+        _inc = o.Includes.Select(i => i.Trim().Replace('\\', '/').Trim('/')).Where(i => i.Length > 0).Distinct().ToList();
         _exclude = new ExcludeMatcher(o.Excludes);
         _srcRoot = Path.GetFullPath(o.SourceDir);
         var target = Path.GetFullPath(o.TargetDir);
@@ -65,6 +67,8 @@ public sealed class CopyEngine
         var name = _o.DestFolder;
         if (string.IsNullOrWhiteSpace(name) || name is "." or ".." || name.IndexOfAny(['/', '\\']) >= 0 || name.StartsWith('.'))
             throw new CopyAbortedException("The destination folder must be a plain folder name (no slash, not starting with a dot).");
+        if (_inc.Any(i => i.Split('/').Any(s => s is "." or "..") || Path.IsPathRooted(i)))
+            throw new CopyAbortedException("The selected folders must be paths inside the source folder.");
         if (!Directory.Exists(_srcRoot))
             throw new CopyAbortedException($"The source folder '{_o.SourceDir}' does not exist (is the disk mounted in the container?).");
         var target = Path.GetFullPath(_o.TargetDir);
@@ -111,6 +115,8 @@ public sealed class CopyEngine
             _ct.ThrowIfCancellationRequested();
             var childRel = rel.Length == 0 ? e.Name : rel + "/" + e.Name;
             if (_exclude.IsExcluded(childRel, e.Name)) continue;
+            var sel = Select(childRel);
+            if (sel == Sel.None || (sel == Sel.Partial && e is not DirectoryInfo)) continue; // outside the chosen folders: not kept, so removed from the copy
             if ((e.Attributes & FileAttributes.ReparsePoint) != 0) { _p.Skipped++; continue; } // symbolic links are not followed
             kept.Add(e.Name);
             var childDst = Path.Combine(dst, e.Name);
@@ -146,6 +152,21 @@ public sealed class CopyEngine
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Error(rel.Length == 0 ? "/" : rel, ex); }
+    }
+
+    enum Sel { None, Partial, Full }
+
+    /// <summary>Full: at or inside a chosen folder. Partial: a folder that leads to a chosen one. None: not wanted.</summary>
+    Sel Select(string rel)
+    {
+        if (_inc.Count == 0) return Sel.Full;
+        bool partial = false;
+        foreach (var i in _inc)
+        {
+            if (rel == i || rel.StartsWith(i + "/", StringComparison.Ordinal)) return Sel.Full;
+            if (i.StartsWith(rel + "/", StringComparison.Ordinal)) partial = true;
+        }
+        return partial ? Sel.Partial : Sel.None;
     }
 
     void CopyFile(FileInfo src, string dst, string rel)

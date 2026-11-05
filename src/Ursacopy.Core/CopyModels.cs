@@ -17,6 +17,8 @@ public sealed class CopyOptions
     public int TrashRetentionDays { get; init; } = 30;
     /// <summary>Re-read each copied file and compare its SHA-256 with the one of the data read from the source.</summary>
     public bool Verify { get; init; }
+    /// <summary>Folders of the source to copy, as paths relative to <see cref="SourceDir"/> (<c>photos</c>, <c>docs/2024</c>). Empty = the whole source.</summary>
+    public IReadOnlyList<string> Includes { get; init; } = [];
     /// <summary>Wildcard patterns (<c>*</c>, <c>?</c>) matched against the name, or against the relative path when they contain a slash.</summary>
     public IReadOnlyList<string> Excludes { get; init; } = [];
 }

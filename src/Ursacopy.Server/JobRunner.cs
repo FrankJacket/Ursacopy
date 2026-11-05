@@ -61,7 +61,7 @@ public sealed class JobRunner
                 var options = new CopyOptions
                 {
                     SourceDir = job.SourceDir, TargetDir = job.TargetDir, TargetId = job.TargetId, DestFolder = job.DestFolder,
-                    MirrorDeletes = job.MirrorDeletes, TrashRetentionDays = job.RetentionDays, Verify = job.Verify, Excludes = job.ExcludeList(),
+                    Includes = job.IncludeList(), MirrorDeletes = job.MirrorDeletes, TrashRetentionDays = job.RetentionDays, Verify = job.Verify, Excludes = job.ExcludeList(),
                 };
                 result = await Task.Run(() => CopyEngine.Run(options, state.Progress, state.Cts.Token));
             }

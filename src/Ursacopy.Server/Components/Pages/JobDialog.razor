@@ -1,13 +1,31 @@
 @inject Repo Repo
 @inject ISnackbar Snack
+@inject IDialogService Dialogs
 
 <MudDialog>
     <DialogContent>
         <MudGrid>
             <MudItem xs="12" md="6"><MudTextField @bind-Value="job.Name" Label="Name" /></MudItem>
             <MudItem xs="12" md="6"><MudTextField @bind-Value="job.DestFolder" Label="Folder on the disk" HelperText="Plain folder name, e.g. photos" /></MudItem>
-            <MudItem xs="12" md="6"><MudTextField @bind-Value="job.SourceDir" Label="Folder to copy (path in the container)" HelperText="e.g. /source/photos" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField T="string" Value="job.SourceDir" ValueChanged="OnSourceChanged" Label="Source folder (path in the container)" HelperText="e.g. /source" /></MudItem>
             <MudItem xs="12" md="6"><MudTextField @bind-Value="job.TargetDir" Label="Disk mount point (path in the container)" HelperText="e.g. /target" /></MudItem>
+            <MudItem xs="12">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Wrap="Wrap.Wrap">
+                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="Pick">Choose folders...</MudButton>
+                    @if (job.IncludeList().Length == 0)
+                    {
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary">The whole source folder is copied.</MudText>
+                    }
+                    else
+                    {
+                        @foreach (var f in job.IncludeList()) { <MudChip T="string" Size="Size.Small">@f</MudChip> }
+                    }
+                </MudStack>
+                @if (job.Id != 0 && job.IncludeList().Length > 0)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">A folder you untick later is removed from the disk at the next run (into the trash if one is kept).</MudText>
+                }
+            </MudItem>
 
             <MudItem xs="12" md="6">
                 <MudSelect T="int" @bind-Value="job.ScheduleMode" Label="When">
@@ -55,12 +73,30 @@
         if (Job is not { } j) return;
         job = new Job // edit a copy: Cancel leaves the list untouched
         {
-            Id = j.Id, Name = j.Name, SourceDir = j.SourceDir, TargetDir = j.TargetDir, DestFolder = j.DestFolder, TargetId = j.TargetId,
+            Id = j.Id, Name = j.Name, SourceDir = j.SourceDir, Includes = j.Includes, TargetDir = j.TargetDir, DestFolder = j.DestFolder, TargetId = j.TargetId,
             Enabled = j.Enabled, ScheduleMode = j.ScheduleMode, DailyTime = j.DailyTime, MirrorDeletes = j.MirrorDeletes,
             RetentionDays = j.RetentionDays, Verify = j.Verify, Excludes = j.Excludes, CreatedUtc = j.CreatedUtc, EstimatedFiles = j.EstimatedFiles,
         };
         originalTarget = j.TargetDir;
         time = TimeSpan.TryParse(j.DailyTime, out var t) ? t : new TimeSpan(2, 0, 0);
+    }
+
+    void OnSourceChanged(string v)
+    {
+        if (v != job.SourceDir) job.Includes = ""; // the chosen sub-folders belonged to the previous source
+        job.SourceDir = v;
+    }
+
+    async Task Pick()
+    {
+        var root = job.SourceDir?.Trim() ?? "";
+        if (root.Length == 0 || !Directory.Exists(root))
+        { Snack.Add("Enter an existing source folder first (path as seen in the container).", Severity.Warning); return; }
+        var parameters = new DialogParameters<FolderPicker> { { x => x.Root, root }, { x => x.Selected, job.IncludeList().ToList() } };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true, BackdropClick = false };
+        var dialog = await Dialogs.ShowAsync<FolderPicker>("Choose the folders to copy", parameters, options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false, Data: List<string> chosen }) job.Includes = string.Join('\n', chosen);
     }
 
     void Save()
