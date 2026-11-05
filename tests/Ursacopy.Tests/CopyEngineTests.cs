@@ -250,6 +250,14 @@ public sealed class CopyEngineTests : IDisposable
     }
 
     [Fact]
+    public void SyncfsFlushesTheTargetFilesystemOnLinux()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        Assert.True(FsSync.TrySyncFs(Path.Combine(_usb, TargetMarker.FileName)));
+        Assert.False(FsSync.TrySyncFs(Path.Combine(_usb, "does-not-exist")));
+    }
+
+    [Fact]
     public void FileNamesWithALineBreakAreReportedNotCopied()
     {
         if (!OperatingSystem.IsLinux()) return; // Windows cannot create such a name
