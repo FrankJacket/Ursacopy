@@ -1,7 +1,9 @@
 # Ursacopy: incremental copy of NAS folders onto an external USB disk (web interface + scheduler) in a Linux container.
 # Build from the repository root:  docker build -t ursacopy .
 
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+# The build runs on the builder's own architecture: the published output is architecture-neutral, so an arm64 image
+# does not need the SDK to run under emulation.
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG VERSION=0.0.0-dev
 WORKDIR /src
 # Restore first, from the project files only, so this layer stays cached while the code changes.
@@ -14,6 +16,11 @@ COPY src/ src/
 RUN dotnet publish src/Ursacopy.Server/Ursacopy.Server.csproj -c Release -o /app -p:UseAppHost=false -p:Version=${VERSION#v}
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
+# "source" links the package on ghcr.io to the repository (and lets the repository's workflows manage it).
+LABEL org.opencontainers.image.title="Ursacopy" \
+      org.opencontainers.image.description="Incremental copy of NAS folders onto an external USB disk, with a web interface." \
+      org.opencontainers.image.source="https://github.com/FrankJacket/Ursacopy" \
+      org.opencontainers.image.vendor="FrankJacket"
 # tzdata: daily schedules use the container's time zone (TZ).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends tzdata \
