@@ -49,6 +49,13 @@
                                  HelperText="0 = delete and overwrite right away. Kept in .ursacopy-trash on the disk." />
             </MudItem>
             <MudItem xs="12" md="6"><MudCheckBox T="bool" @bind-Value="job.Verify" Label="Verify each copied file (slower)" /></MudItem>
+            <MudItem xs="12">
+                <MudCheckBox T="bool" @bind-Value="job.WindowsDisk" Label="The disk is formatted NTFS or exFAT" />
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    Names NTFS / exFAT cannot hold (: * ? " &lt; &gt; | ..., names differing only by case) are reported instead of being copied wrongly,
+                    and an exFAT date shifted by whole hours (daylight saving time) is not taken for a change. Untick for an ext4 / XFS / Btrfs disk.
+                </MudText>
+            </MudItem>
             <MudItem xs="12"><MudTextField @bind-Value="job.Excludes" Label="Exclusions (one per line, wildcards * and ?)" Lines="5" Variant="Variant.Outlined" /></MudItem>
             <MudItem xs="12"><MudCheckBox T="bool" @bind-Value="job.Enabled" Label="Enabled (scheduled runs happen only when enabled)" /></MudItem>
         </MudGrid>
@@ -75,7 +82,7 @@
         {
             Id = j.Id, Name = j.Name, SourceDir = j.SourceDir, Includes = j.Includes, TargetDir = j.TargetDir, DestFolder = j.DestFolder, TargetId = j.TargetId,
             Enabled = j.Enabled, ScheduleMode = j.ScheduleMode, DailyTime = j.DailyTime, MirrorDeletes = j.MirrorDeletes,
-            RetentionDays = j.RetentionDays, Verify = j.Verify, Excludes = j.Excludes, CreatedUtc = j.CreatedUtc, EstimatedFiles = j.EstimatedFiles,
+            RetentionDays = j.RetentionDays, Verify = j.Verify, WindowsDisk = j.WindowsDisk, Excludes = j.Excludes, CreatedUtc = j.CreatedUtc, EstimatedFiles = j.EstimatedFiles, EstimatedBytes = j.EstimatedBytes,
         };
         originalTarget = j.TargetDir;
         time = TimeSpan.TryParse(j.DailyTime, out var t) ? t : new TimeSpan(2, 0, 0);

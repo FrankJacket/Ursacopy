@@ -4,7 +4,7 @@ namespace Ursacopy.Server.Data;
 
 public sealed class Repo(Db db)
 {
-    const string JobCols = "Id, Name, SourceDir, Includes, TargetDir, DestFolder, TargetId, Enabled, ScheduleMode, DailyTime, MirrorDeletes, RetentionDays, Verify, Excludes, CreatedUtc, EstimatedFiles";
+    const string JobCols = "Id, Name, SourceDir, Includes, TargetDir, DestFolder, TargetId, Enabled, ScheduleMode, DailyTime, MirrorDeletes, RetentionDays, Verify, WindowsDisk, Excludes, CreatedUtc, EstimatedFiles, EstimatedBytes";
 
     public List<Job> ListJobs()
     {
@@ -23,13 +23,13 @@ public sealed class Repo(Db db)
         using var c = db.Open();
         if (j.Id == 0)
             return j.Id = c.ExecuteScalar<int>("""
-                INSERT INTO Jobs (Name, SourceDir, Includes, TargetDir, DestFolder, TargetId, Enabled, ScheduleMode, DailyTime, MirrorDeletes, RetentionDays, Verify, Excludes, CreatedUtc, EstimatedFiles)
-                VALUES (@Name, @SourceDir, @Includes, @TargetDir, @DestFolder, @TargetId, @Enabled, @ScheduleMode, @DailyTime, @MirrorDeletes, @RetentionDays, @Verify, @Excludes, @CreatedUtc, @EstimatedFiles);
+                INSERT INTO Jobs (Name, SourceDir, Includes, TargetDir, DestFolder, TargetId, Enabled, ScheduleMode, DailyTime, MirrorDeletes, RetentionDays, Verify, WindowsDisk, Excludes, CreatedUtc, EstimatedFiles, EstimatedBytes)
+                VALUES (@Name, @SourceDir, @Includes, @TargetDir, @DestFolder, @TargetId, @Enabled, @ScheduleMode, @DailyTime, @MirrorDeletes, @RetentionDays, @Verify, @WindowsDisk, @Excludes, @CreatedUtc, @EstimatedFiles, @EstimatedBytes);
                 SELECT last_insert_rowid();
                 """, j);
         c.Execute("""
             UPDATE Jobs SET Name=@Name, SourceDir=@SourceDir, Includes=@Includes, TargetDir=@TargetDir, DestFolder=@DestFolder, TargetId=@TargetId, Enabled=@Enabled,
-              ScheduleMode=@ScheduleMode, DailyTime=@DailyTime, MirrorDeletes=@MirrorDeletes, RetentionDays=@RetentionDays, Verify=@Verify, Excludes=@Excludes
+              ScheduleMode=@ScheduleMode, DailyTime=@DailyTime, MirrorDeletes=@MirrorDeletes, RetentionDays=@RetentionDays, Verify=@Verify, WindowsDisk=@WindowsDisk, Excludes=@Excludes
             WHERE Id=@Id
             """, j);
         return j.Id;
@@ -41,10 +41,10 @@ public sealed class Repo(Db db)
         c.Execute("UPDATE Jobs SET TargetId=@targetId WHERE Id=@jobId", new { jobId, targetId });
     }
 
-    public void SetEstimate(int jobId, long files)
+    public void SetEstimate(int jobId, long files, long bytes)
     {
         using var c = db.Open();
-        c.Execute("UPDATE Jobs SET EstimatedFiles=@files WHERE Id=@jobId", new { jobId, files });
+        c.Execute("UPDATE Jobs SET EstimatedFiles=@files, EstimatedBytes=@bytes WHERE Id=@jobId", new { jobId, files, bytes });
     }
 
     /// <summary>Deletes the job and its history; the copy on the external disk is left alone.</summary>

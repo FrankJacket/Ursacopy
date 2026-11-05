@@ -178,6 +178,115 @@ public sealed class CopyEngineTests : IDisposable
         Assert.Equal(CopyStatus.Failed, CopyEngine.Run(o, new CopyProgress(), CancellationToken.None).Status);
     }
 
+    CopyOptions Win(bool windows) => new()
+    {
+        SourceDir = _src, TargetDir = _usb, TargetId = _id, DestFolder = "data", WindowsDisk = windows,
+    };
+
+    [Fact]
+    public void WholeHourShiftOfModificationTimeIsNotAChangeOnWindowsDisks()
+    {
+        var t = new DateTime(2024, 3, 1, 12, 0, 0, DateTimeKind.Utc);
+        Write("a.txt", "same", t);
+        Run(Win(true), out _);
+        File.SetLastWriteTimeUtc(Dst("a.txt"), t.AddHours(1)); // what a daylight-saving change does to exFAT dates
+
+        Run(Win(true), out var p);
+        Assert.Equal(0, p.Copied);
+        Assert.Equal(1, p.Unchanged);
+
+        File.SetLastWriteTimeUtc(Dst("a.txt"), t.AddMinutes(37)); // not a whole hour: a real change
+        Run(Win(true), out var p2);
+        Assert.Equal(1, p2.Copied);
+
+        File.SetLastWriteTimeUtc(Dst("a.txt"), t.AddHours(1));
+        Run(Win(false), out var p3); // an ext4 / Btrfs disk keeps exact dates: any shift is a change
+        Assert.Equal(1, p3.Copied);
+    }
+
+    [Fact]
+    public void JournalOfAnInterruptedBatchForcesTheListedFilesToBeCopiedAgain()
+    {
+        var t = new DateTime(2024, 3, 1, 12, 0, 0, DateTimeKind.Utc);
+        Write("a.txt", "GOOD", t); Write("b.txt", "keep", t);
+        Run(Opts(), out _);
+        // a.txt looks perfect (size, date) but its data never reached the disk before the cable was pulled
+        File.WriteAllText(Dst("a.txt"), "\0\0\0\0");
+        File.SetLastWriteTimeUtc(Dst("a.txt"), t);
+        Directory.CreateDirectory(Path.Combine(_usb, CopyEngine.StateDirName));
+        File.WriteAllText(Path.Combine(_usb, CopyEngine.StateDirName, "data.pending"), "a.txt\n");
+
+        Run(Opts(), out var p);
+        Assert.Equal("GOOD", File.ReadAllText(Dst("a.txt")));
+        Assert.Equal(1, p.Copied);
+        Assert.Equal(1, p.Unchanged);
+        Assert.False(File.Exists(Path.Combine(_usb, CopyEngine.StateDirName, "data.pending")));
+    }
+
+    [Fact]
+    public void ManyFilesAreCommittedInBatchesWithoutLeftovers()
+    {
+        for (int i = 0; i < 450; i++) Write($"d{i % 7}/f{i}.txt", "x" + i);
+        var r = Run(Opts(verify: true), out var p);
+        Assert.Equal(CopyStatus.Success, r.Status);
+        Assert.Equal(450, p.Copied);
+        Assert.Equal(450, Directory.GetFiles(Path.Combine(_usb, "data"), "*.txt", SearchOption.AllDirectories).Length);
+        Assert.Empty(Directory.GetFiles(_usb, "*" + CopyEngine.PartSuffix, SearchOption.AllDirectories));
+        Assert.False(File.Exists(Path.Combine(_usb, CopyEngine.StateDirName, "data.pending")));
+        Assert.Equal(0, Run(Opts(), out var p2).Status == CopyStatus.Success ? p2.Copied : -1);
+    }
+
+    [Fact]
+    public void ReplacedFilesInABatchKeepTheirOldVersionInTheTrash()
+    {
+        for (int i = 0; i < 5; i++) Write($"f{i}.txt", "old" + i, new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        Run(Opts(), out _);
+        for (int i = 0; i < 5; i++) Write($"f{i}.txt", "newer" + i, new DateTime(2024, 6, 1, 0, 0, 0, DateTimeKind.Utc));
+        Run(Opts(), out var p);
+        Assert.Equal(5, p.Copied);
+        Assert.Equal("newer3", File.ReadAllText(Dst("f3.txt")));
+        var old = Directory.GetFiles(Path.Combine(_usb, CopyEngine.TrashDirName), "f3.txt", SearchOption.AllDirectories);
+        Assert.Equal("old3", File.ReadAllText(Assert.Single(old)));
+    }
+
+    [Fact]
+    public void FileNamesWithALineBreakAreReportedNotCopied()
+    {
+        if (!OperatingSystem.IsLinux()) return; // Windows cannot create such a name
+        Write("bad\nname.txt", "x"); Write("ok.txt", "y");
+        var r = Run(Opts(), out var p);
+        Assert.Equal(CopyStatus.CompletedWithErrors, r.Status);
+        Assert.Equal(1, p.Copied);
+    }
+
+    [Fact]
+    public void NamesDifferingOnlyByCaseAreReportedOnWindowsDisks()
+    {
+        if (!OperatingSystem.IsLinux()) return; // Windows cannot hold both in the source either
+        Write("Photo.jpg", "1"); Write("photo.jpg", "2");
+        var r = Run(Win(true), out var p);
+        Assert.Equal(CopyStatus.CompletedWithErrors, r.Status);
+        Assert.Equal(1, p.Copied);
+        Assert.Equal("1", File.ReadAllText(Dst("Photo.jpg"))); // always the same one wins
+    }
+
+    [Theory]
+    [InlineData("ok.txt", null)]
+    [InlineData("a:b.txt", "':'")]
+    [InlineData("what?.txt", "'?'")]
+    [InlineData("dots...", "dot")]
+    [InlineData("space ", "space")]
+    [InlineData("NUL.txt", "reserved")]
+    [InlineData("com1", "reserved")]
+    [InlineData("console.txt", null)]
+    [InlineData("tab\there", "control")]
+    public void WindowsNameRules(string name, string? expectedFragment)
+    {
+        var problem = WindowsNames.Problem(name);
+        if (expectedFragment is null) Assert.Null(problem);
+        else Assert.Contains(expectedFragment, problem);
+    }
+
     [Fact]
     public void LeftoverPartFilesAreCleaned()
     {

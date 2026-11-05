@@ -56,6 +56,23 @@
             @if (disk.State == DiskState.Connected && disk.TotalBytes > 0) { <span> &middot; @Fmt.Bytes(disk.FreeBytes) free of @Fmt.Bytes(disk.TotalBytes)</span> }
         </MudText>
 
+        @if (disk.State == DiskState.Connected && job.EstimatedBytes > 0 && disk.TotalBytes > 0)
+        {
+            @if (job.EstimatedBytes > disk.TotalBytes)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
+                    The source holds about @Fmt.Bytes(job.EstimatedBytes) of files but the disk is only @Fmt.Bytes(disk.TotalBytes): it cannot hold the copy.
+                    A source compressed by ZFS or Btrfs takes more room once copied to a disk without compression.
+                </MudAlert>
+            }
+            else if (job.EstimatedBytes > disk.FreeBytes && last is null)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">
+                    The source holds about @Fmt.Bytes(job.EstimatedBytes) of files and the disk has @Fmt.Bytes(disk.FreeBytes) free.
+                </MudAlert>
+            }
+        }
+
         @if (state is not null)
         {
             if (state.Queued)

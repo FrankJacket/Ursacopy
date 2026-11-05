@@ -15,6 +15,11 @@ public sealed class CopyOptions
     public bool MirrorDeletes { get; init; } = true;
     /// <summary>Days to keep deleted and replaced files in <c>.ursacopy-trash</c> (0 = delete / overwrite right away).</summary>
     public int TrashRetentionDays { get; init; } = 30;
+    /// <summary>
+    /// The disk is NTFS or exFAT: names Windows cannot store (and names that differ only by case) are reported instead of being
+    /// copied wrongly, and a modification time shifted by whole hours (exFAT stores local time) is not taken for a change.
+    /// </summary>
+    public bool WindowsDisk { get; init; }
     /// <summary>Re-read each copied file and compare its SHA-256 with the one of the data read from the source.</summary>
     public bool Verify { get; init; }
     /// <summary>Folders of the source to copy, as paths relative to <see cref="SourceDir"/> (<c>photos</c>, <c>docs/2024</c>). Empty = the whole source.</summary>

@@ -25,10 +25,14 @@ public sealed class Job
     public bool MirrorDeletes { get; set; } = true;
     public int RetentionDays { get; set; } = 30;
     public bool Verify { get; set; }
+    /// <summary>The disk is NTFS or exFAT: report names it cannot hold, tolerate whole-hour shifts of exFAT dates.</summary>
+    public bool WindowsDisk { get; set; } = true;
     public string Excludes { get; set; } = string.Join('\n', Ursacopy.Core.ExcludeMatcher.NasDefaults);
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     /// <summary>Number of files seen by the last complete run: the denominator of the progress bar.</summary>
     public long EstimatedFiles { get; set; }
+    /// <summary>Total size of the files seen by the last complete run (what the source holds, uncompressed).</summary>
+    public long EstimatedBytes { get; set; }
 
     public string[] IncludeList() =>
         Includes.Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

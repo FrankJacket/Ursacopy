@@ -12,17 +12,28 @@ public sealed class CopyEngine
 {
     public const string PartSuffix = ".ursacopy-part";
     public const string TrashDirName = ".ursacopy-trash";
+    /// <summary>Folder at the root of the disk holding the journal of the batch being committed.</summary>
+    public const string StateDirName = ".ursacopy-state";
     const string StampFormat = "yyyyMMdd-HHmmss";
     const int BufferSize = 1 << 20;
+    const int BatchFiles = 200;                // files written before one commit (one journal + one flush of the disk)
+    const long BatchBytes = 256L << 20;
+    const long SpaceReserve = 64L << 20;
     static readonly double ToleranceSeconds = 2; // FAT / exFAT keep modification times with a 2 s granularity
+
+    sealed record Pending(string Tmp, string Dst, string Rel, bool Existing);
 
     readonly CopyOptions _o;
     readonly CopyProgress _p;
     readonly CancellationToken _ct;
     readonly ExcludeMatcher _exclude;
     readonly List<string> _errors = [];
-    readonly string _srcRoot, _dstRoot, _trashRoot, _stamp;
+    readonly string _srcRoot, _dstRoot, _trashRoot, _stamp, _target, _journal;
     readonly List<string> _inc;
+    readonly List<Pending> _batch = [];
+    readonly HashSet<string> _pendingTmp = new(StringComparer.Ordinal);
+    long _batchBytes;
+    long _free = -1; // free space of the disk, refreshed when the running estimate gets low
 
     CopyEngine(CopyOptions o, CopyProgress p, CancellationToken ct)
     {
@@ -30,9 +41,10 @@ public sealed class CopyEngine
         _inc = o.Includes.Select(i => i.Trim().Replace('\\', '/').Trim('/')).Where(i => i.Length > 0).Distinct().ToList();
         _exclude = new ExcludeMatcher(o.Excludes);
         _srcRoot = Path.GetFullPath(o.SourceDir);
-        var target = Path.GetFullPath(o.TargetDir);
+        var target = _target = Path.GetFullPath(o.TargetDir);
         _dstRoot = Path.Combine(target, o.DestFolder);
         _trashRoot = Path.Combine(target, TrashDirName, o.DestFolder);
+        _journal = Path.Combine(target, StateDirName, o.DestFolder + ".pending");
         _stamp = DateTime.UtcNow.ToString(StampFormat, CultureInfo.InvariantCulture);
     }
 
@@ -47,16 +59,19 @@ public sealed class CopyEngine
         try
         {
             Validate();
+            RecoverUnfinishedBatch();
             _p.Phase = "Copying";
             WalkDir(_srcRoot, _dstRoot, "");
+            _p.Phase = "Writing to the disk";
+            CommitBatch();
             _p.Phase = "Cleaning the trash";
             PurgeTrash();
             status = _p.Errors > 0 ? CopyStatus.CompletedWithErrors : CopyStatus.Success;
             if (status == CopyStatus.CompletedWithErrors) message = $"{_p.Errors} item(s) could not be copied.";
         }
-        catch (OperationCanceledException) { status = CopyStatus.Cancelled; message = "Cancelled."; }
-        catch (CopyAbortedException ex) { status = CopyStatus.Failed; message = ex.Message; }
-        catch (Exception ex) { status = CopyStatus.Failed; message = ex.Message; }
+        catch (OperationCanceledException) { status = CopyStatus.Cancelled; message = "Cancelled."; TryCommit(); }
+        catch (CopyAbortedException ex) { status = CopyStatus.Failed; message = ex.Message; TryCommit(); }
+        catch (Exception ex) { status = CopyStatus.Failed; message = ex.Message; TryCommit(); }
         _p.Phase = "Finished";
         _p.CurrentFile = null;
         return new CopyResult(status, message, _errors, DateTime.UtcNow - started);
@@ -100,7 +115,8 @@ public sealed class CopyEngine
         List<FileSystemInfo> entries;
         try
         {
-            entries = new DirectoryInfo(src).EnumerateFileSystemInfos("*", new EnumerationOptions { IgnoreInaccessible = false, AttributesToSkip = 0 }).ToList();
+            entries = new DirectoryInfo(src).EnumerateFileSystemInfos("*", new EnumerationOptions { IgnoreInaccessible = false, AttributesToSkip = 0 })
+                .OrderBy(e => e.Name, StringComparer.Ordinal).ToList(); // fixed order: of two names differing by case, the same one always wins
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -118,7 +134,16 @@ public sealed class CopyEngine
             var sel = Select(childRel);
             if (sel == Sel.None || (sel == Sel.Partial && e is not DirectoryInfo)) continue; // outside the chosen folders: not kept, so removed from the copy
             if ((e.Attributes & FileAttributes.ReparsePoint) != 0) { _p.Skipped++; continue; } // symbolic links are not followed
-            kept.Add(e.Name);
+            if (e.Name.Contains('\n') || e.Name.Contains('\r'))
+            { Error(childRel, new IOException("the name contains a line break")); continue; }
+            if (_o.WindowsDisk)
+            {
+                if (WindowsNames.Problem(e.Name) is { } why)
+                { Error(childRel, new IOException($"cannot be stored on an NTFS / exFAT disk: {why}")); continue; }
+                if (!kept.Add(e.Name))
+                { Error(childRel, new IOException("differs only by case from another item of the same folder; NTFS / exFAT cannot hold both")); continue; }
+            }
+            else kept.Add(e.Name);
             var childDst = Path.Combine(dst, e.Name);
             try
             {
@@ -145,6 +170,7 @@ public sealed class CopyEngine
                 var childRel = rel.Length == 0 ? d.Name : rel + "/" + d.Name;
                 try
                 {
+                    if (_pendingTmp.Contains(d.FullName)) continue; // written by this run, waiting for its commit
                     if (d is FileInfo && d.Name.EndsWith(PartSuffix, StringComparison.Ordinal)) { d.Delete(); continue; }
                     if (_o.MirrorDeletes && !kept.Contains(d.Name)) Discard(d.FullName, childRel, replaced: false);
                 }
@@ -177,7 +203,7 @@ public sealed class CopyEngine
         if (File.Exists(dst))
         {
             var cur = new FileInfo(dst);
-            if (cur.Length == src.Length && Math.Abs((cur.LastWriteTimeUtc - src.LastWriteTimeUtc).TotalSeconds) <= ToleranceSeconds)
+            if (cur.Length == src.Length && SameTime(cur.LastWriteTimeUtc, src.LastWriteTimeUtc))
             {
                 _p.Unchanged++;
                 return;
@@ -188,7 +214,9 @@ public sealed class CopyEngine
 
         _p.CurrentFile = rel;
         _p.CurrentFileSize = src.Length;
+        EnsureSpace(src.Length);
         var tmp = dst + PartSuffix;
+        bool queued = false;
         try
         {
             byte[]? sourceHash = null;
@@ -205,28 +233,150 @@ public sealed class CopyEngine
                     output.Write(buf, 0, n);
                     _p.BytesCopied += n;
                 }
-                output.Flush(true); // data on the disk before the rename: a USB disk may be unplugged at any time
                 sourceHash = hash?.GetHashAndReset();
             }
             File.SetLastWriteTimeUtc(tmp, src.LastWriteTimeUtc);
             if (sourceHash is not null && !sourceHash.AsSpan().SequenceEqual(HashFile(tmp)))
                 throw new IOException("Verification failed: the copy does not match the source.");
-            if (existing && _o.TrashRetentionDays > 0) Discard(dst, rel, replaced: true);
-            File.Move(tmp, dst, overwrite: true);
+            // Not renamed yet: the file only takes its final name when its batch is committed (see CommitBatch).
+            _batch.Add(new Pending(tmp, dst, rel, existing));
+            _pendingTmp.Add(tmp);
+            queued = true;
             _p.Copied++;
+            _batchBytes += src.Length;
+            if (_batch.Count >= BatchFiles || _batchBytes >= BatchBytes) CommitBatch();
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not CopyAbortedException)
         {
-            try { File.Delete(tmp); } catch { /* best effort */ }
+            if (!queued) try { File.Delete(tmp); } catch { /* best effort */ }
             if (ex is IOException && IsDiskFull(src.Length))
                 throw new CopyAbortedException("The external disk is full.");
             throw;
         }
         catch (OperationCanceledException)
         {
-            try { File.Delete(tmp); } catch { /* best effort */ }
+            if (!queued) try { File.Delete(tmp); } catch { /* best effort */ }
             throw;
         }
+    }
+
+    /// <summary>
+    /// Same size and a modification time that matches: equal within the FAT granularity, or (exFAT stores local time) shifted by
+    /// a whole number of hours, which a change of time zone or of daylight saving time produces for every file at once.
+    /// </summary>
+    bool SameTime(DateTime a, DateTime b)
+    {
+        var diff = Math.Abs((a - b).TotalSeconds);
+        if (diff <= ToleranceSeconds) return true;
+        if (!_o.WindowsDisk) return false;
+        var hours = Math.Round(diff / 3600);
+        return hours is >= 1 and <= 14 && Math.Abs(diff - hours * 3600) <= ToleranceSeconds;
+    }
+
+    long QueryFree()
+    {
+        try { return new DriveInfo(_dstRoot).AvailableFreeSpace; }
+        catch { return -1; }
+    }
+
+    /// <summary>Stops the run with a clear message before writing a file the disk cannot hold.</summary>
+    void EnsureSpace(long size)
+    {
+        if (_free < 0 || _free < size + SpaceReserve) _free = QueryFree();
+        if (_free < 0) return; // unknown: the write error will tell
+        if (_free < size + SpaceReserve)
+            throw new CopyAbortedException($"The external disk is full ({Bytes(_free)} free, {Bytes(size)} needed for the next file).");
+        _free -= size;
+    }
+
+    static string Bytes(long b)
+    {
+        string[] u = ["B", "KB", "MB", "GB", "TB"];
+        double v = b; int i = 0;
+        while (v >= 1000 && i < u.Length - 1) { v /= 1000; i++; }
+        return i == 0 ? $"{b} B" : $"{v:0.#} {u[i]}";
+    }
+
+    /// <summary>
+    /// Makes the files copied since the last commit appear under their final names. Writing the journal first, then renaming, then
+    /// flushing the whole disk once replaces one flush per file: after an unplugged cable, the next run finds the journal and
+    /// recopies exactly the files that may be incomplete (NTFS / exFAT may keep the right size and date with unwritten data).
+    /// </summary>
+    void CommitBatch()
+    {
+        if (_batch.Count == 0) return;
+        var batch = _batch.ToList();
+        _batch.Clear();
+        _batchBytes = 0;
+        _free = -1;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_journal)!);
+            using (var j = new FileStream(_journal, FileMode.Create, FileAccess.Write, FileShare.None))
+            using (var w = new StreamWriter(j, new System.Text.UTF8Encoding(false)))
+            {
+                foreach (var b in batch) w.Write(b.Rel + "\n");
+                w.Flush();
+                j.Flush(true);
+            }
+            foreach (var b in batch)
+            {
+                try
+                {
+                    if (b.Existing && _o.TrashRetentionDays > 0 && File.Exists(b.Dst)) Discard(b.Dst, b.Rel, replaced: true);
+                    File.Move(b.Tmp, b.Dst, overwrite: true);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _p.Copied--;
+                    Error(b.Rel, ex);
+                    try { File.Delete(b.Tmp); } catch { /* best effort */ }
+                }
+            }
+            if (!FsSync.TrySyncFs(Path.Combine(_target, TargetMarker.FileName)))
+                foreach (var b in batch) // no syncfs here (Windows, some FUSE drivers): flush the files one by one
+                    try { using var f = new FileStream(b.Dst, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite); f.Flush(true); } catch { /* gone or locked */ }
+            File.Delete(_journal);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            foreach (var b in batch) try { File.Delete(b.Tmp); } catch { /* best effort */ }
+            throw new CopyAbortedException($"Could not write to the external disk: {ex.Message}");
+        }
+        finally
+        {
+            foreach (var b in batch) _pendingTmp.Remove(b.Tmp);
+        }
+    }
+
+    /// <summary>On cancel or failure, still give their final names to the files that were completely copied.</summary>
+    void TryCommit()
+    {
+        try { CommitBatch(); }
+        catch { /* the run already failed; leftovers are cleaned by the next one */ }
+    }
+
+    /// <summary>A journal left by a run that ended abruptly lists files that may be incomplete: delete them so they are copied again.</summary>
+    void RecoverUnfinishedBatch()
+    {
+        if (!File.Exists(_journal)) return;
+        _p.Phase = "Checking the end of the previous run";
+        foreach (var rel in File.ReadAllLines(_journal))
+        {
+            if (rel.Length == 0 || Path.IsPathRooted(rel) || rel.Split('/').Any(s => s is "." or "..")) continue;
+            var path = Path.Combine(_dstRoot, rel.Replace('/', Path.DirectorySeparatorChar));
+            foreach (var p in new[] { path, path + PartSuffix })
+            {
+                try
+                {
+                    if (!File.Exists(p)) continue;
+                    File.SetAttributes(p, FileAttributes.Normal);
+                    File.Delete(p);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Error(rel, ex); }
+            }
+        }
+        File.Delete(_journal);
     }
 
     bool IsDiskFull(long needed)

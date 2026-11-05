@@ -61,7 +61,7 @@ public sealed class JobRunner
                 var options = new CopyOptions
                 {
                     SourceDir = job.SourceDir, TargetDir = job.TargetDir, TargetId = job.TargetId, DestFolder = job.DestFolder,
-                    Includes = job.IncludeList(), MirrorDeletes = job.MirrorDeletes, TrashRetentionDays = job.RetentionDays, Verify = job.Verify, Excludes = job.ExcludeList(),
+                    Includes = job.IncludeList(), MirrorDeletes = job.MirrorDeletes, TrashRetentionDays = job.RetentionDays, Verify = job.Verify, WindowsDisk = job.WindowsDisk, Excludes = job.ExcludeList(),
                 };
                 result = await Task.Run(() => CopyEngine.Run(options, state.Progress, state.Cts.Token));
             }
@@ -74,7 +74,7 @@ public sealed class JobRunner
             run.FilesSeen = p.FilesSeen; run.Copied = p.Copied; run.BytesCopied = p.BytesCopied;
             run.Unchanged = p.Unchanged; run.Deleted = p.Deleted; run.Errors = p.Errors;
             _repo.FinishRun(run);
-            if (result.Status is CopyStatus.Success or CopyStatus.CompletedWithErrors) _repo.SetEstimate(job.Id, p.FilesSeen);
+            if (result.Status is CopyStatus.Success or CopyStatus.CompletedWithErrors) _repo.SetEstimate(job.Id, p.FilesSeen, p.BytesSeen);
             _log.LogInformation("Job '{Job}': {Status} ({Copied} copied, {Unchanged} unchanged, {Deleted} removed, {Errors} errors) in {Elapsed}",
                 job.Name, result.Status, p.Copied, p.Unchanged, p.Deleted, p.Errors, Fmt.Duration(result.Elapsed));
         }

@@ -26,10 +26,23 @@ Open `http://<nas>:5090`:
 
 The web interface has no login: keep it on your LAN, or put it behind your NAS reverse proxy with authentication.
 
+## Source on Btrfs or ZFS, disk on NTFS or exFAT
+
+- **Copy from a snapshot, not from the live volume.** Files that change during the copy (databases, VM disks) would be copied in an inconsistent state. Mount a read-only snapshot as the source instead: ZFS exposes them under `<dataset>/.zfs/snapshot/<name>`, a Btrfs snapshot is a read-only sub-volume you can bind-mount. Create the snapshot in a scheduled task of the NAS just before the job, or rotate a fixed snapshot name.
+- **Prefer NTFS to exFAT.** NTFS has a journal; exFAT has none, so an unplugged cable leaves it "dirty" and may leave files with the right size but unwritten data. Ursacopy protects against that (see below), but NTFS is the safer disk. On Linux use the kernel `ntfs3` driver (kernel 5.15 and later; check with `cat /proc/filesystems`): `ntfs-3g` (FUSE) is much slower. Mount with `noatime`.
+- **Cluster size.** exFAT often defaults to 128 KB clusters on a large disk: every small file then takes 128 KB. For many small files format NTFS with 4 KB clusters, or exFAT with 32 KB.
+- **File names.** Tick "The disk is formatted NTFS or exFAT" in the job (default). Names that NTFS / exFAT cannot store (`: * ? " < > |`, trailing dot or space, `CON`, `NUL`..., over 255 characters) and names that differ only by case (`Photo.jpg` / `photo.jpg`, which Btrfs and ZFS allow) are not copied and are listed as errors in the history. Rename them in the source.
+- **Dates.** exFAT stores local time: a daylight-saving change shifts every date by one hour. With the option ticked, a file whose date differs from the source by whole hours (and that has the same size) is not copied again.
+- **Space.** A ZFS / Btrfs source with compression or deduplication takes more room on the disk. The job card warns when the source (uncompressed size seen by the last run) is larger than the disk, and a run stops with a clear message when the next file does not fit.
+- **Not preserved**: permissions, ACLs, extended attributes, hard links (each link becomes a copy), reflinks, symbolic links (skipped).
+
+## How the copy is made safe when the cable is pulled
+
+Writing every file and flushing it to the disk one by one is very slow on USB. Ursacopy works in batches of about 200 files: the files are copied under a temporary name, then a small journal listing the batch is written to the disk (`.ursacopy-state/`), the files are renamed, and the whole disk is flushed once. If the run is interrupted during a batch, the next run finds the journal and copies the listed files again, even if they look complete. A run that is cancelled still gives their final names to the files that were completely copied.
+
 ## Good to know
 
-- **Disk format**: ext4 or Btrfs keeps permissions and any file name. exFAT / NTFS are readable on Windows and macOS too but reject some characters in names (`: * ? " < > |`): such files are reported as errors in the history, the rest is copied. FAT32 cannot hold files over 4 GB.
-- **What is copied**: files and folders with their modification times. Symbolic links are skipped. Owners and permissions are not preserved (they would not exist on exFAT / NTFS anyway).
+- **FAT32** cannot hold files over 4 GB: do not use it.
 - **Not a bootable image**: this is a file copy. For full-machine images of Windows PCs use Ursavault.
 - **Unplugging**: wait until the status is no longer "running", then use your NAS's "eject USB disk" function. Each copied file is flushed to the disk before it is renamed.
 - **User**: the container runs as root so that it can read every share and write any disk format. To run unprivileged, set `user:` in `compose.yaml`.
