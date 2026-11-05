@@ -1,10 +1,12 @@
 # Ursacopy on a NAS: copies folders of the NAS onto an external USB disk plugged into it.
 #   1. adapt the two bind mounts below (the NAS folders to copy, and where the USB disk is mounted on the NAS)
-#   2. docker compose up -d --build
+#   2. docker compose up -d      (to update later: docker compose pull && docker compose up -d)
 #   3. open http://<nas>:5090, create a job, click "Initialise the disk" once, then "Run now"
+# The image is pulled from the GitHub Container Registry (published by the "Docker image" workflow). To build it from
+# source instead, replace the "image:" line by "build: ." and run  docker compose up -d --build
 services:
   ursacopy:
-    build: .
+    image: ghcr.io/frankjacket/ursacopy:latest
     container_name: ursacopy
     restart: unless-stopped
     ports:

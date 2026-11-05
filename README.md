@@ -14,9 +14,11 @@ Copies folders of a NAS onto an **external USB disk** plugged into it, increment
 
 ## Install (Docker Compose)
 
-Edit the two bind mounts of `compose.yaml` (the NAS folder to copy, and where the NAS mounts the USB disk), then:
+The image is published on the GitHub Container Registry as `ghcr.io/frankjacket/ursacopy` (amd64 and arm64). Edit the two bind mounts of `compose.yaml` (the NAS folder to copy, and where the NAS mounts the USB disk), then:
 
-    docker compose up -d --build
+    docker compose up -d
+
+If the package is private, log in once first with a GitHub token that can read packages (`docker login ghcr.io`), or make the package public (GitHub profile > Packages > `ursacopy` > Package settings > Change visibility). To update: `docker compose pull && docker compose up -d`. To build from source instead, replace the `image:` line of `compose.yaml` by `build: .` and run `docker compose up -d --build`.
 
 Open `http://<nas>:5090`:
 
@@ -47,6 +49,10 @@ Writing every file and flushing it to the disk one by one is very slow on USB. U
 - **Unplugging**: wait until the status is no longer "running", then use your NAS's "eject USB disk" function. Each copied file is flushed to the disk before it is renamed.
 - **User**: the container runs as root so that it can read every share and write any disk format. To run unprivileged, set `user:` in `compose.yaml`.
 - **Mount propagation** (`rslave`): lets the container notice a disk plugged in after it started. On NAS firmwares that do not support it, plug the disk first or restart the container after plugging.
+
+## Publishing a new version
+
+On GitHub: **Actions > Docker image > Run workflow**. Give the version (e.g. `0.2.0`), choose whether to also tag it `latest`, and the platforms (default `linux/amd64,linux/arm64`). The workflow runs the tests, then builds and pushes `ghcr.io/frankjacket/ursacopy:<version>` (and `:latest`). It never runs on its own: nothing is published until you start it. The version shows in the title bar of the web interface.
 
 ## Layout
 
