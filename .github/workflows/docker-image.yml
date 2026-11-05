@@ -1,6 +1,6 @@
 name: Docker image
 
-# Manual only: Actions > "Docker image" > Run workflow.
+# Manual only: Actions > "Docker image" > Run workflow (workflow_dispatch, no automatic trigger).
 # Runs the tests, then builds the image and pushes it to the GitHub Container Registry (ghcr.io/<owner>/ursacopy).
 on:
   workflow_dispatch:
