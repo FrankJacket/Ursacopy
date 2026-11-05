@@ -1,0 +1,88 @@
+@inject Repo Repo
+@inject ISnackbar Snack
+
+<MudDialog>
+    <DialogContent>
+        <MudGrid>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="job.Name" Label="Name" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="job.DestFolder" Label="Folder on the disk" HelperText="Plain folder name, e.g. photos" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="job.SourceDir" Label="Folder to copy (path in the container)" HelperText="e.g. /source/photos" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="job.TargetDir" Label="Disk mount point (path in the container)" HelperText="e.g. /target" /></MudItem>
+
+            <MudItem xs="12" md="6">
+                <MudSelect T="int" @bind-Value="job.ScheduleMode" Label="When">
+                    <MudSelectItem T="int" Value="@Schedule.Manual">Manual only</MudSelectItem>
+                    <MudSelectItem T="int" Value="@Schedule.Daily">Every day at a given time</MudSelectItem>
+                    <MudSelectItem T="int" Value="@Schedule.OnPlug">Whenever the disk is connected</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            @if (job.ScheduleMode == Schedule.Daily)
+            {
+                <MudItem xs="12" md="6"><MudTimePicker @bind-Time="time" Label="Time of day (server time zone)" /></MudItem>
+            }
+            else
+            {
+                <MudItem md="6" xs="0"></MudItem>
+            }
+
+            <MudItem xs="12"><MudCheckBox T="bool" @bind-Value="job.MirrorDeletes" Label="Mirror deletions: remove from the disk what no longer exists in the source" /></MudItem>
+            <MudItem xs="12" md="6">
+                <MudNumericField T="int" @bind-Value="job.RetentionDays" Min="0" Label="Days to keep deleted and replaced files"
+                                 HelperText="0 = delete and overwrite right away. Kept in .ursacopy-trash on the disk." />
+            </MudItem>
+            <MudItem xs="12" md="6"><MudCheckBox T="bool" @bind-Value="job.Verify" Label="Verify each copied file (slower)" /></MudItem>
+            <MudItem xs="12"><MudTextField @bind-Value="job.Excludes" Label="Exclusions (one per line, wildcards * and ?)" Lines="5" Variant="Variant.Outlined" /></MudItem>
+            <MudItem xs="12"><MudCheckBox T="bool" @bind-Value="job.Enabled" Label="Enabled (scheduled runs happen only when enabled)" /></MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save">@(job.Id == 0 ? "Add job" : "Save changes")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = default!;
+    /// <summary>Job to edit; null = new job.</summary>
+    [Parameter] public Job? Job { get; set; }
+
+    Job job = new();
+    TimeSpan? time = new(2, 0, 0);
+    string originalTarget = "";
+
+    protected override void OnInitialized()
+    {
+        if (Job is not { } j) return;
+        job = new Job // edit a copy: Cancel leaves the list untouched
+        {
+            Id = j.Id, Name = j.Name, SourceDir = j.SourceDir, TargetDir = j.TargetDir, DestFolder = j.DestFolder, TargetId = j.TargetId,
+            Enabled = j.Enabled, ScheduleMode = j.ScheduleMode, DailyTime = j.DailyTime, MirrorDeletes = j.MirrorDeletes,
+            RetentionDays = j.RetentionDays, Verify = j.Verify, Excludes = j.Excludes, CreatedUtc = j.CreatedUtc, EstimatedFiles = j.EstimatedFiles,
+        };
+        originalTarget = j.TargetDir;
+        time = TimeSpan.TryParse(j.DailyTime, out var t) ? t : new TimeSpan(2, 0, 0);
+    }
+
+    void Save()
+    {
+        job.Name = job.Name?.Trim() ?? "";
+        job.DestFolder = job.DestFolder?.Trim() ?? "";
+        job.SourceDir = job.SourceDir?.Trim() ?? "";
+        job.TargetDir = job.TargetDir?.Trim() ?? "";
+        if (job.Name.Length == 0 || job.SourceDir.Length == 0 || job.TargetDir.Length == 0 || job.DestFolder.Length == 0)
+        { Snack.Add("Name, source, mount point and folder on the disk are required.", Severity.Warning); return; }
+        if (job.DestFolder is "." or ".." || job.DestFolder.StartsWith('.') || job.DestFolder.IndexOfAny(['/', '\\']) >= 0)
+        { Snack.Add("The folder on the disk must be a plain name: no slash, not starting with a dot.", Severity.Warning); return; }
+        if (job.ScheduleMode == Schedule.Daily)
+        {
+            if (time is null) { Snack.Add("Pick a time of day.", Severity.Warning); return; }
+            job.DailyTime = time.Value.ToString(@"hh\:mm");
+        }
+        if (job.RetentionDays < 0) job.RetentionDays = 0;
+        if (job.Id != 0 && job.TargetDir != originalTarget) job.TargetId = null; // another mount point: the disk has to be initialised again
+
+        Repo.SaveJob(job);
+        Snack.Add("Job saved.", Severity.Success);
+        MudDialog.Close(DialogResult.Ok(job.Id));
+    }
+}

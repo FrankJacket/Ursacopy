@@ -1,0 +1,65 @@
+@page "/history"
+@inherits AutoRefreshBase
+@inject Repo Repo
+@inject IDialogService Dialogs
+
+<MudText Typo="Typo.h5" Class="mb-3">History</MudText>
+
+<MudTable Items="runs" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm">
+    <HeaderContent>
+        <MudTh>Job</MudTh>
+        <MudTh>Started</MudTh>
+        <MudTh>Duration</MudTh>
+        <MudTh>Result</MudTh>
+        <MudTh>Copied</MudTh>
+        <MudTh>Unchanged</MudTh>
+        <MudTh>Removed</MudTh>
+        <MudTh>Errors</MudTh>
+        <MudTh></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Job">@context.JobName <MudText Typo="Typo.caption" Class="mud-text-secondary" Inline="true">(@context.Reason)</MudText></MudTd>
+        <MudTd DataLabel="Started">@Fmt.Local(context.StartedUtc)</MudTd>
+        <MudTd DataLabel="Duration">@(context.EndedUtc is { } e ? Fmt.Duration(e - context.StartedUtc) : "…")</MudTd>
+        <MudTd DataLabel="Result">
+            <MudChip T="string" Size="Size.Small" Color="@Color(context.Status)">@Label(context.Status)</MudChip>
+        </MudTd>
+        <MudTd DataLabel="Copied">@context.Copied.ToString("N0") (@Fmt.Bytes(context.BytesCopied))</MudTd>
+        <MudTd DataLabel="Unchanged">@context.Unchanged.ToString("N0")</MudTd>
+        <MudTd DataLabel="Removed">@context.Deleted.ToString("N0")</MudTd>
+        <MudTd DataLabel="Errors">@context.Errors.ToString("N0")</MudTd>
+        <MudTd>
+            @if (!string.IsNullOrEmpty(context.Message) || !string.IsNullOrEmpty(context.Details))
+            {
+                var run = context;
+                <MudIconButton Icon="@Icons.Material.Filled.Info" Size="Size.Small" OnClick="() => Show(run)" />
+            }
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText Class="pa-4">No run yet.</MudText></NoRecordsContent>
+</MudTable>
+
+@code {
+    List<RunRow> runs = [];
+
+    protected override void Load() => runs = Repo.ListRuns(200);
+
+    static Color Color(string s) => s switch
+    {
+        "Success" => MudBlazor.Color.Success,
+        "CompletedWithErrors" => MudBlazor.Color.Warning,
+        "Running" => MudBlazor.Color.Info,
+        "Cancelled" => MudBlazor.Color.Default,
+        _ => MudBlazor.Color.Error,
+    };
+
+    static string Label(string s) => s == "CompletedWithErrors" ? "Completed with errors" : s;
+
+    async Task Show(RunRow r)
+    {
+        var text = r.Message ?? "";
+        if (!string.IsNullOrEmpty(r.Details)) text += (text.Length > 0 ? "\n\n" : "") + r.Details;
+        await Dialogs.ShowMessageBox($"{r.JobName} - {Fmt.Local(r.StartedUtc)}", text, yesText: "Close",
+            options: new DialogOptions { MaxWidth = MaxWidth.Large });
+    }
+}

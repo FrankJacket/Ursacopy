@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/Ursacopy.Core/Ursacopy.Core.csproj" />
+  <Project Path="src/Ursacopy.Server/Ursacopy.Server.csproj" />
+  <Project Path="tests/Ursacopy.Tests/Ursacopy.Tests.csproj" />
+</Solution>

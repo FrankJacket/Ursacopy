@@ -1,0 +1,37 @@
+@inherits LayoutComponentBase
+
+<MudThemeProvider @ref="_theme" @bind-IsDarkMode="_dark" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudAppBar Elevation="1">
+        <MudIcon Icon="@Icons.Material.Filled.Usb" Class="mr-2" />
+        <MudText Typo="Typo.h6">Ursacopy</MudText>
+        <MudText Typo="Typo.caption" Class="ml-3" Style="opacity:.75">v@(AppInfo.Version)</MudText>
+        <MudSpacer />
+        <MudIconButton Icon="@(_dark ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)" Color="Color.Inherit" OnClick="() => _dark = !_dark" />
+    </MudAppBar>
+    <MudDrawer Open="true" Elevation="0" Variant="DrawerVariant.Persistent">
+        <MudNavMenu>
+            <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">Copy jobs</MudNavLink>
+            <MudNavLink Href="/history" Icon="@Icons.Material.Filled.History">History</MudNavLink>
+        </MudNavMenu>
+    </MudDrawer>
+    <MudMainContent Class="pt-20 px-4 pb-4">@Body</MudMainContent>
+</MudLayout>
+
+@code {
+    MudThemeProvider? _theme;
+    bool _dark;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && _theme is not null)
+        {
+            _dark = await _theme.GetSystemDarkModeAsync();
+            StateHasChanged();
+        }
+    }
+}

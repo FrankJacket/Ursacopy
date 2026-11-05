@@ -1,0 +1,32 @@
+# Ursacopy on a NAS: copies folders of the NAS onto an external USB disk plugged into it.
+#   1. adapt the two bind mounts below (the NAS folders to copy, and where the USB disk is mounted on the NAS)
+#   2. docker compose up -d --build
+#   3. open http://<nas>:5090, create a job, click "Initialise the disk" once, then "Run now"
+services:
+  ursacopy:
+    build: .
+    container_name: ursacopy
+    restart: unless-stopped
+    ports:
+      - "5090:5090"
+    environment:
+      TZ: ${TZ:-America/Toronto}   # time zone of the daily schedules
+    volumes:
+      # Job catalog and history (SQLite).
+      - ursacopy-data:/data
+      # What to copy: mounted read-only, the container can never alter your data.
+      - type: bind
+        source: /volume1/shared        # <- NAS folder(s) to copy; one mount per folder, or a parent folder
+        target: /source
+        read_only: true
+      # The USB disk, as mounted by the NAS. Create the jobs with mount point /target.
+      # rslave lets the container see the disk when it is plugged in (or re-plugged) after the container started;
+      # if your NAS does not support it, remove the "bind:" lines and restart the container after plugging the disk.
+      - type: bind
+        source: /volumeUSB1/usbshare   # <- mount point of the USB disk on the NAS
+        target: /target
+        bind:
+          propagation: rslave
+
+volumes:
+  ursacopy-data:

@@ -1,0 +1,182 @@
+@page "/"
+@inherits AutoRefreshBase
+@inject Repo Repo
+@inject JobRunner Runner
+@inject IDialogService Dialogs
+@inject ISnackbar Snack
+@inject IConfiguration Cfg
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+    <MudText Typo="Typo.h5">Copy jobs</MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="() => Edit(null)">New job</MudButton>
+</MudStack>
+
+@if (jobs.Count == 0)
+{
+    <MudAlert Severity="Severity.Info">
+        No job yet. A job mirrors one folder of the NAS onto an external USB disk: only new and changed files are copied.
+        Click <b>New job</b>, then initialise the disk once.
+    </MudAlert>
+}
+
+@foreach (var j in jobs)
+{
+    var job = j;
+    var state = Runner.Get(job.Id);
+    var disk = DiskStatus.Check(job);
+    lastRuns.TryGetValue(job.Id, out var last);
+    <MudPaper Class="pa-4 mb-3" Elevation="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Wrap="Wrap.Wrap">
+            <MudText Typo="Typo.h6">@job.Name</MudText>
+            @if (!job.Enabled) { <MudChip T="string" Size="Size.Small">Disabled</MudChip> }
+            <MudChip T="string" Size="Size.Small" Color="@DiskColor(disk.State)">@DiskText(disk)</MudChip>
+            <MudSpacer />
+            @if (state is not null)
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop" OnClick="() => Runner.Cancel(job.Id)">Cancel</MudButton>
+            }
+            else
+            {
+                @if (disk.State is DiskState.NotInitialised or DiskState.OtherDisk)
+                {
+                    <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Usb" OnClick="() => InitDisk(job, disk)">
+                        @(disk.State == DiskState.OtherDisk ? "Use this disk" : "Initialise the disk")
+                    </MudButton>
+                }
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow"
+                           Disabled="@(disk.State != DiskState.Connected)" OnClick="() => RunNow(job)">Run now</MudButton>
+            }
+            <MudIconButton Icon="@Icons.Material.Filled.Edit" Disabled="@(state is not null)" OnClick="() => Edit(job)" />
+            <MudIconButton Icon="@Icons.Material.Filled.Delete" Disabled="@(state is not null)" OnClick="() => Delete(job)" />
+        </MudStack>
+
+        <MudText Typo="Typo.body2" Class="mud-text-secondary mt-1" Style="word-break:break-all">
+            @job.SourceDir &rarr; @job.TargetDir/@job.DestFolder &middot; @ScheduleText(job)
+            @if (disk.State == DiskState.Connected && disk.TotalBytes > 0) { <span> &middot; @Fmt.Bytes(disk.FreeBytes) free of @Fmt.Bytes(disk.TotalBytes)</span> }
+        </MudText>
+
+        @if (state is not null)
+        {
+            if (state.Queued)
+            {
+                <MudText Typo="Typo.body2" Class="mt-2">Waiting for another job to finish...</MudText>
+            }
+            else
+            {
+                var p = state.Progress;
+                <MudProgressLinear Class="my-2" Color="Color.Primary" Rounded="true"
+                                   Indeterminate="@(job.EstimatedFiles == 0)" Value="@Pct(job, p)" />
+                <MudText Typo="Typo.body2">
+                    @p.Phase: @p.FilesSeen.ToString("N0") files checked, @p.Copied.ToString("N0") copied (@Fmt.Bytes(p.BytesCopied)),
+                    @p.Deleted.ToString("N0") removed@(p.Errors > 0 ? $", {p.Errors:N0} errors" : "")
+                </MudText>
+                @if (p.CurrentFile is { } cf)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary" Style="word-break:break-all">@cf</MudText>
+                }
+            }
+        }
+        else if (last is not null)
+        {
+            <MudText Typo="Typo.body2" Class="mt-2">
+                Last run @Fmt.Local(last.StartedUtc): <b>@last.Status</b>
+                &middot; @last.Copied.ToString("N0") copied (@Fmt.Bytes(last.BytesCopied)), @last.Unchanged.ToString("N0") unchanged, @last.Deleted.ToString("N0") removed
+                @if (last.Errors > 0) { <span> &middot; @last.Errors.ToString("N0") errors</span> }
+                @if (last.EndedUtc is { } end) { <span> &middot; @Fmt.Duration(end - last.StartedUtc)</span> }
+            </MudText>
+            @if (!string.IsNullOrEmpty(last.Message) && last.Status != "Success")
+            {
+                <MudText Typo="Typo.caption" Color="Color.Error">@last.Message</MudText>
+            }
+        }
+    </MudPaper>
+}
+
+@code {
+    List<Job> jobs = [];
+    Dictionary<int, RunRow> lastRuns = [];
+
+    protected override void Load()
+    {
+        jobs = Repo.ListJobs();
+        lastRuns = Repo.LastRuns();
+    }
+
+    static Color DiskColor(DiskState s) => s switch
+    {
+        DiskState.Connected => Color.Success,
+        DiskState.NotInitialised => Color.Warning,
+        DiskState.OtherDisk => Color.Error,
+        _ => Color.Default,
+    };
+
+    static string DiskText(DiskInfo d) => d.State switch
+    {
+        DiskState.Connected => "Disk connected",
+        DiskState.NotInitialised => "Disk not initialised",
+        DiskState.OtherDisk => "A different disk is connected",
+        _ => "Disk not connected",
+    };
+
+    static string ScheduleText(Job j) => j.ScheduleMode switch
+    {
+        Schedule.Daily => $"every day at {j.DailyTime}",
+        Schedule.OnPlug => "when the disk is connected",
+        _ => "manual",
+    };
+
+    static double Pct(Job j, CopyProgress p) =>
+        j.EstimatedFiles <= 0 ? 0 : Math.Min(99, p.FilesSeen * 100.0 / j.EstimatedFiles);
+
+    void RunNow(Job j)
+    {
+        if (!Runner.Start(j.Id, "Manual")) Snack.Add("This job is already running.", Severity.Info);
+    }
+
+    async Task Edit(Job? j)
+    {
+        var parameters = new DialogParameters<JobDialog> { { x => x.Job, j } };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true, BackdropClick = false };
+        var dialog = await Dialogs.ShowAsync<JobDialog>(j is null ? "New job" : $"Edit job: {j.Name}", parameters, options);
+        await dialog.Result;
+        Load();
+    }
+
+    async Task Delete(Job j)
+    {
+        var ok = await Dialogs.ShowMessageBox("Delete job",
+            $"Delete the job '{j.Name}' and its history? The copy already on the external disk is not touched.",
+            yesText: "Delete", cancelText: "Cancel");
+        if (ok != true) return;
+        Repo.DeleteJob(j.Id);
+        Load();
+    }
+
+    async Task InitDisk(Job j, DiskInfo disk)
+    {
+        if (!Directory.Exists(j.TargetDir)) { Snack.Add($"The folder {j.TargetDir} does not exist in the container.", Severity.Error); return; }
+        if (MountInfo.IsMountPoint(j.TargetDir) == false && !Cfg.GetValue<bool>("AllowAnyTarget"))
+        {
+            Snack.Add($"{j.TargetDir} is not a mount point: nothing would be written to a USB disk. Mount the disk there in compose.yaml.", Severity.Error);
+            return;
+        }
+        string size = "unknown size";
+        try { var d = new DriveInfo(j.TargetDir); size = $"{Fmt.Bytes(d.TotalSize)}, {Fmt.Bytes(d.AvailableFreeSpace)} free"; } catch { }
+        var existing = TargetMarker.Read(j.TargetDir);
+        var ok = await Dialogs.ShowMessageBox(existing is null ? "Initialise the external disk" : "Use this disk",
+            existing is null
+                ? $"A small marker file will be written at the root of {j.TargetDir} ({size}). Check that this is the size of your USB disk and not of the NAS system disk; backups will only ever be written to a disk that carries this marker."
+                : $"The disk mounted at {j.TargetDir} ({size}) already carries a marker. This job will use it instead of the disk it was set up with.",
+            yesText: existing is null ? "Initialise" : "Use this disk", cancelText: "Cancel");
+        if (ok != true) return;
+        try
+        {
+            var id = TargetMarker.Initialize(j.TargetDir);
+            Repo.SetTargetId(j.Id, id);
+            Snack.Add("Disk ready.", Severity.Success);
+        }
+        catch (Exception ex) { Snack.Add($"Could not write to the disk: {ex.Message}", Severity.Error); }
+        Load();
+    }
+}
