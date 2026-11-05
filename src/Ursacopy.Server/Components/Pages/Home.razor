@@ -82,11 +82,20 @@
             else
             {
                 var p = state.Progress;
+                var elapsed = DateTime.UtcNow - (state.RunStartedUtc ?? state.StartedUtc);
+                var (fraction, remaining) = ProgressEstimator.Estimate(p.BytesSeen, p.FilesSeen, job.EstimatedBytes, job.EstimatedFiles, elapsed);
                 <MudProgressLinear Class="my-2" Color="Color.Primary" Rounded="true"
-                                   Indeterminate="@(job.EstimatedFiles == 0)" Value="@Pct(job, p)" />
+                                   Indeterminate="@(fraction is null)" Value="@((fraction ?? 0) * 100)" />
                 <MudText Typo="Typo.body2">
                     @p.Phase: @p.FilesSeen.ToString("N0") files checked, @p.Copied.ToString("N0") copied (@Fmt.Bytes(p.BytesCopied)),
                     @p.Deleted.ToString("N0") removed@(p.Errors > 0 ? $", {p.Errors:N0} errors" : "")
+                </MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                    Elapsed @Fmt.Duration(elapsed)
+                    @if (p.BytesCopied > 0 && elapsed.TotalSeconds >= 5) { <span> &middot; writing at @Fmt.Bytes((long)(p.BytesCopied / elapsed.TotalSeconds))/s on average</span> }
+                    @if (fraction is null) { <span> &middot; first run: no time estimate yet, the next runs will show one</span> }
+                    else if (remaining is { } left) { <span> &middot; about @Fmt.Duration(left) left (estimate)</span> }
+                    else { <span> &middot; estimating the time left...</span> }
                 </MudText>
                 @if (p.CurrentFile is { } cf)
                 {
@@ -142,9 +151,6 @@
         Schedule.OnPlug => "when the disk is connected",
         _ => "manual",
     };
-
-    static double Pct(Job j, CopyProgress p) =>
-        j.EstimatedFiles <= 0 ? 0 : Math.Min(99, p.FilesSeen * 100.0 / j.EstimatedFiles);
 
     void RunNow(Job j)
     {

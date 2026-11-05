@@ -296,6 +296,30 @@ public sealed class CopyEngineTests : IDisposable
     }
 
     [Fact]
+    public void ProgressEstimatorUsesBytesThenFilesAndHidesEarlyGuesses()
+    {
+        // half of the bytes in 10 minutes: about 10 minutes left
+        var (f, left) = ProgressEstimator.Estimate(500, 10, 1000, 100, TimeSpan.FromMinutes(10));
+        Assert.Equal(0.5, f!.Value, 3);
+        Assert.Equal(10, left!.Value.TotalMinutes, 3);
+
+        // no size known: falls back to the number of files
+        (f, left) = ProgressEstimator.Estimate(0, 25, 0, 100, TimeSpan.FromMinutes(1));
+        Assert.Equal(0.25, f!.Value, 3);
+        Assert.Equal(3, left!.Value.TotalMinutes, 3);
+
+        // first run ever: nothing to compare with
+        Assert.Equal((null, null), ProgressEstimator.Estimate(500, 10, 0, 0, TimeSpan.FromMinutes(1)));
+
+        // too early (under 3 %, or under 10 s): a fraction but no time left
+        Assert.Null(ProgressEstimator.Estimate(10, 1, 1000, 100, TimeSpan.FromMinutes(1)).Remaining);
+        Assert.Null(ProgressEstimator.Estimate(500, 1, 1000, 100, TimeSpan.FromSeconds(5)).Remaining);
+
+        // the source grew since the last run: capped below 100 %
+        Assert.Equal(0.99, ProgressEstimator.Estimate(5000, 1, 1000, 100, TimeSpan.FromMinutes(1)).Fraction!.Value, 3);
+    }
+
+    [Fact]
     public void LeftoverPartFilesAreCleaned()
     {
         Write("a.txt", "a");

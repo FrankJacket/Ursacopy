@@ -11,7 +11,10 @@ public sealed class RunState(string reason)
     public string Reason { get; } = reason;
     /// <summary>True while waiting for another job: the external disk is written by one job at a time.</summary>
     public volatile bool Queued = true;
+    /// <summary>When the job was queued.</summary>
     public DateTime StartedUtc { get; } = DateTime.UtcNow;
+    /// <summary>When the copy itself began (after any wait for another job): the base of the elapsed time and of the estimate.</summary>
+    public DateTime? RunStartedUtc { get; set; }
 }
 
 /// <summary>Runs jobs one at a time (a single USB disk: two parallel copies would only make it seek) and exposes live progress.</summary>
@@ -50,6 +53,7 @@ public sealed class JobRunner
             entered = true;
             var job = _repo.GetJob(jobId);
             if (job is null) return;
+            state.RunStartedUtc = DateTime.UtcNow;
             state.Queued = false;
 
             var run = new RunRow { Id = _repo.AddRun(job, state.Reason), JobId = job.Id, JobName = job.Name, StartedUtc = state.StartedUtc };
