@@ -11,6 +11,8 @@ public sealed class CopyOptions
     public required string TargetId { get; init; }
     /// <summary>Single folder name, under <see cref="TargetDir"/>, that receives the mirror.</summary>
     public required string DestFolder { get; init; }
+    /// <summary>Optional plain folder name inside <see cref="DestFolder"/>: the mirror then lives in <c>DestFolder/DestSubFolder</c> (several sources sharing one job). Empty = directly in <see cref="DestFolder"/>.</summary>
+    public string DestSubFolder { get; init; } = "";
     /// <summary>Remove from the copy what no longer exists in the source.</summary>
     public bool MirrorDeletes { get; init; } = true;
     /// <summary>Days to keep deleted and replaced files in <c>.ursacopy-trash</c> (0 = delete / overwrite right away).</summary>

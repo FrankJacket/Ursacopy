@@ -42,9 +42,9 @@ public sealed class CopyEngine
         _exclude = new ExcludeMatcher(o.Excludes);
         _srcRoot = Path.GetFullPath(o.SourceDir);
         var target = _target = Path.GetFullPath(o.TargetDir);
-        _dstRoot = Path.Combine(target, o.DestFolder);
-        _trashRoot = Path.Combine(target, TrashDirName, o.DestFolder);
-        _journal = Path.Combine(target, StateDirName, o.DestFolder + ".pending");
+        _dstRoot = Path.Combine(target, o.DestFolder, o.DestSubFolder);
+        _trashRoot = Path.Combine(target, TrashDirName, o.DestFolder, o.DestSubFolder);
+        _journal = Path.Combine(target, StateDirName, (o.DestSubFolder.Length == 0 ? o.DestFolder : o.DestFolder + "~" + o.DestSubFolder) + ".pending");
         _stamp = DateTime.UtcNow.ToString(StampFormat, CultureInfo.InvariantCulture);
     }
 
@@ -82,6 +82,9 @@ public sealed class CopyEngine
         var name = _o.DestFolder;
         if (string.IsNullOrWhiteSpace(name) || name is "." or ".." || name.IndexOfAny(['/', '\\']) >= 0 || name.StartsWith('.'))
             throw new CopyAbortedException("The destination folder must be a plain folder name (no slash, not starting with a dot).");
+        var sub = _o.DestSubFolder;
+        if (sub.Length > 0 && (sub is "." or ".." || sub.IndexOfAny(['/', '\\']) >= 0 || sub.StartsWith('.')))
+            throw new CopyAbortedException("The destination sub-folder must be a plain folder name (no slash, not starting with a dot).");
         if (_inc.Any(i => i.Split('/').Any(s => s is "." or "..") || Path.IsPathRooted(i)))
             throw new CopyAbortedException("The selected folders must be paths inside the source folder.");
         if (!Directory.Exists(_srcRoot))
